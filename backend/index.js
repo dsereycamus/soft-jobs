@@ -2,7 +2,8 @@ const express = require("express");
 require("dotenv").config();
 const cors = require("cors");
 const { getUserInfo, createNewUser } = require("./consultas");
-const { checkRoutes, jwtUtils, cryptUtils } = require("./utils");
+const { jwtUtils, cryptUtils } = require("./utils");
+const { checkAuth } = require("./middleware");
 
 const app = express();
 
@@ -15,32 +16,17 @@ app.listen(PORT, () => {
   console.log(`¡Servidor encendido en puerto ${PORT}!`);
 });
 
-app.use((req, res, next) => {
-  const now = new Date();
-  console.log(
-    `[${now.toLocaleString("es-CL")}]: Se ha consultado la ruta de ${req.path}`
-  );
-  const authRoutes = ["/usuarios+GET"];
-  const auth = req.headers.authorization;
-
-  if (auth && checkRoutes(`${req.path}+${req.method}`, authRoutes)) {
-    const decoded = jwtUtils.decodeUser(auth?.replace("Bearer ", ""));
-    if (decoded) {
-      req.headers.email = decoded;
-      next();
-    } else return res.status(401).json({ message: "Debes iniciar sesión" });
-  } else if (!auth && checkRoutes(`${req.path}+${req.method}`, authRoutes)) {
-    return res.status(401).json({ message: "Debes iniciar sesión" });
-  } else {
-    next();
-  }
-});
+app.use(checkAuth);
 
 //Info de un usuario.
 app.get("/usuarios", async (req, res) => {
   try {
     const { email } = req.headers;
     const data = await getUserInfo(email);
+    if (data.length === 0)
+      return res
+        .status(404)
+        .json({ error: `No se encontró el usuario con email: ${email}` });
     delete data[0].password;
     delete data[0].id;
     return res.status(200).json({ ...data[0] });
@@ -76,6 +62,10 @@ app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     const result = await getUserInfo(email);
+    if (!email || !password)
+      return res
+        .status(400)
+        .json({ message: "Debes ingresar correo y contraseña" });
     if (result.length > 0) {
       if (await cryptUtils.checkPassword(result[0].password, password)) {
         const token = jwtUtils.signUser(email);
